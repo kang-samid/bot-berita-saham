@@ -1,18 +1,14 @@
-import feedparser
-import requests
-import time
+import json
+import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
 
-# --- KONFIGURASI ---
-BOT_TOKEN = '6467585568:AAH_vmQvGa7bBDI-lfmPhEzq2R_4SqcRs-s'
-CHAT_ID = '@Kang_Zeyen'
-RSS_URL = 'https://news.google.com/rss/search?q=saham+OR+emiten+OR+"Bursa+Efek+Indonesia"+OR+IHSG+OR+Tbk+OR+investasi+OR+dividen+OR+"laporan+keuangan"+OR+IPO&hl=id&gl=ID&ceid=ID:id'
-
-# Setup Google Sheets
+# --- Setup Google Sheets ---
 scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets', "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+
+# Mengambil kredensial dari Environment Variable GOOGLE_CREDENTIALS
+creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open("DatabaseBot").sheet1
 
