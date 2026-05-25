@@ -1,29 +1,21 @@
-from flask import Flask
-from threading import Thread
-
-# Flask kecil untuk menipu Render agar mengira ini adalah web service
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot Sedang Aktif"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-t = Thread(target=run)
-t.start()
-
-import feedparser
-import requests
-import time
-import gspread
-import json
-import os
+import feedparser, requests, time, gspread, json, os
 from flask import Flask
 from threading import Thread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+
+# --- 1. KONFIGURASI (Taruh di atas agar terbaca) ---
+BOT_TOKEN = '6467585568:AAH_vmQvGa7bBDI-lfmPhEzq2R_4SqcRs-s'
+CHAT_ID = '@Kang_Zeyen'
+RSS_URL = 'https://news.google.com/rss/search?q=saham+OR+emiten+OR+"Bursa+Efek+Indonesia"+OR+IHSG+OR+Tbk+OR+investasi+OR+dividen+OR+"laporan+keuangan"+OR+IPO&hl=id&gl=ID&ceid=ID:id'
+
+# --- 2. SETUP FLASK ---
+app = Flask('')
+@app.route('/')
+def home(): return "Bot Sedang Aktif"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
 
 # --- Setup Google Sheets ---
 scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets', "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
@@ -63,6 +55,7 @@ def check_and_send():
                 time.sleep(2)
 
 def main():
+    print("Bot sudah berjalan dan siap memantau berita!")
     while True:
         try:
             check_and_send()
@@ -70,12 +63,8 @@ def main():
             print(f"Error: {e}")
         time.sleep(600)
 
+# --- 4. EKSEKUSI ---
 if __name__ == "__main__":
-    print("Memulai bot...")
-    
-    # 1. Jalankan Flask di thread terpisah agar Render tidak protes
     t = Thread(target=run)
     t.start()
-    
-    # 2. Jalankan fungsi bot utama
     main()
