@@ -48,6 +48,7 @@ def send_telegram(title, link):
     requests.post(url, data=payload)
 
 def check_and_send():
+    print("Mengecek RSS feed...") # Tambahkan ini agar muncul di log
     feed = feedparser.parse(RSS_URL)
     today = datetime.now().strftime("%d %b %Y")
     sent_links = get_sent_links() # Ambil data terbaru dari Cloud
