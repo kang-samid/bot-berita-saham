@@ -71,4 +71,11 @@ def main():
         time.sleep(600)
 
 if __name__ == "__main__":
+    print("Memulai bot...")
+    
+    # 1. Jalankan Flask di thread terpisah agar Render tidak protes
+    t = Thread(target=run)
+    t.start()
+    
+    # 2. Jalankan fungsi bot utama
     main()
