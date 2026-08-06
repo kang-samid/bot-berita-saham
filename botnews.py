@@ -1,4 +1,4 @@
-import feedparserhttps://github.com/kang-samid/bot-berita-saham/blob/main/botnews.py
+import feedparser
 import requests
 import time
 import gspread
