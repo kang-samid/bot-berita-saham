@@ -5,12 +5,29 @@ import gspread
 import json
 import os
 import re
-from flask import Flask
-from threading import Thread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 import pytz
+
+# Fitur Flask (Opsional: Try-Except agar tidak error jika dijalankan secara lokal)
+try:
+    from flask import Flask
+    from threading import Thread
+    app = Flask('')
+
+    @app.route('/')
+    def home():
+        return "Bot News Saham Sedang Aktif"
+
+    def run():
+        app.run(host='0.0.0.0', port=8080)
+
+    def start_flask():
+        t = Thread(target=run)
+        t.start()
+except ImportError:
+    def start_flask():
+        pass
 
 # --- 1. KONFIGURASI ---
 BOT_TOKEN = '6467585568:AAH_vmQvGa7bBDI-lfmPhEzq2R_4SqcRs-s'
@@ -28,20 +45,17 @@ TARGET_SAHAM = [
   "SMGR", "SMRA", "SSIA", "TAPG", "TLKM", "TOWR", "TPIA", "UNTR", "UNVR", "WIFI"
 ]
 
-# Ticker yang merupakan kata umum (membutuhkan validasi konteks ganda)
-KATA_UMUM = {"RAJA", "RATU", "EMAS", "BUMI", "BUKA", "DEWA", "WIFI", "ELSA", "CUAN"}
+# Ticker kata umum (membutuhkan validasi konteks ganda)
+KATA_UMUM = {"RAJA", "RATU", "EMAS", "BUMI", "BUKA", "DEWA", "WIFI", "ELSA", "CUAN", "MIKA", "INDY"}
 
-# --- 2. SETUP FLASK (Server Keep-Alive) ---
-app = Flask('')
+# Kata kunci judul yang menandakan berita RANGKUMAN / MULTI-EMITEN
+KATA_RANGKUMAN = [
+    "REKOMENDASI", "REKOMENDASIKAN", "IHSG", "TOP GAINERS", "TOP LOSERS", 
+    "SOPING SAHAM", "KOLEKSI SAHAM", "PILAH-PILIH", "CERAH", "MERAH", 
+    "KOMPAK", "POTENSI REBOUND", "CEK SAHAM", "DAFTAR SAHAM", "LAJU IHSG", "CUPON"
+]
 
-@app.route('/')
-def home():
-    return "Bot Sedang Aktif"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-# --- 3. SETUP GOOGLE SHEETS ---
+# --- 2. SETUP GOOGLE SHEETS ---
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
@@ -49,13 +63,21 @@ scope = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-sheet = client.open("DatabaseBot").sheet1
+def init_google_sheets():
+    try:
+        creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        return client.open("DatabaseBot").sheet1
+    except Exception as e:
+        print(f"Peringatan Google Sheets (Diabaikan jika lokal): {e}")
+        return None
+
+sheet = init_google_sheets()
 
 def get_sent_links():
-    """Mengambil semua link yang sudah terkirim dari kolom A Google Sheets"""
+    if not sheet:
+        return set()
     try:
         return set(sheet.col_values(1))
     except Exception as e:
@@ -63,15 +85,15 @@ def get_sent_links():
         return set()
 
 def save_to_sheet(link):
-    """Menambah link baru ke baris paling bawah di Google Sheets"""
+    if not sheet:
+        return
     try:
         sheet.append_row([link])
     except Exception as e:
         print(f"Error menyimpan ke Google Sheets: {e}")
 
-# --- 4. FUNGSI LOGIKA BOT ---
+# --- 3. FUNGSI LOGIKA BOT ---
 def generate_rss_urls(saham_list, chunk_size=20):
-    """Membagi 80 saham menjadi batch kecil (per 20 saham)"""
     urls = []
     for i in range(0, len(saham_list), chunk_size):
         chunk = saham_list[i:i + chunk_size]
@@ -81,7 +103,6 @@ def generate_rss_urls(saham_list, chunk_size=20):
     return urls
 
 def format_ke_wib(published_str):
-    """Konversi string waktu RSS ke objek datetime berzona waktu WIB"""
     try:
         dt = parsedate_to_datetime(published_str)
         wib_tz = pytz.timezone('Asia/Jakarta')
@@ -90,20 +111,29 @@ def format_ke_wib(published_str):
         return None
 
 def is_target_saham(title):
-    """Penyaringan presisi dengan validasi kata umum dan regex boundary"""
     title_upper = title.upper()
-    konteks_saham = ["SAHAM", "EMITEN", "TBK", "BEI", "IHSG", "DIVIDEN", "IPO", "BURSA", "LAPORAN KEUANGAN"]
+
+    # 1. Filter Kata Rangkuman / Multi-Emiten
+    if any(kata in title_upper for kata in KATA_RANGKUMAN):
+        return False, None
+
+    # 2. Cek Emiten yang Cocok
+    konteks_saham = ["SAHAM", "EMITEN", "TBK", "DIVIDEN", "IPO", "LAPORAN KEUANGAN","PENDAPATAN","LABA"]
     ada_konteks = any(k in title_upper for k in konteks_saham)
     
+    matched_list = []
     for saham in TARGET_SAHAM:
         if re.search(rf'\b{saham}\b', title_upper):
             if saham in KATA_UMUM:
                 if ada_konteks:
-                    return True, saham
-                else:
-                    continue  # Abai jika berita non-saham
-            return True, saham
-            
+                    matched_list.append(saham)
+            else:
+                matched_list.append(saham)
+
+    # 3. Abaikan jika berita menyebut lebih dari 1 emiten (Single emiten saja)
+    if len(matched_list) == 1:
+        return True, matched_list[0]
+        
     return False, None
 
 def send_telegram(title, link, source, pub_date_str, matched_saham):
@@ -133,33 +163,52 @@ def check_and_send():
     rss_urls = generate_rss_urls(TARGET_SAHAM, chunk_size=20)
     wib_tz = pytz.timezone('Asia/Jakarta')
     now_wib = datetime.now(wib_tz)
-    sent_links = get_sent_links()
     
+    # Menghitung batas waktu sejak kemarin jam 00:00 WIB
+    kemarin_12malam = (now_wib - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    sent_links = get_sent_links()
+    collected_entries = []
+
+    # STEP 1: Kumpulkan seluruh berita dari semua chunk RSS
     for url in rss_urls:
         feed = feedparser.parse(url)
-        
-        for entry in reversed(feed.entries):
+        for entry in feed.entries:
             if entry.link in sent_links:
                 continue
                 
             raw_pub = entry.published if 'published' in entry else ''
             dt_wib = format_ke_wib(raw_pub)
             
-            # Hanya memproses berita hari ini (WIB)
-            if dt_wib and dt_wib.date() == now_wib.date():
+            # Cek jika berita terbit sejak kemarin jam 00:00 WIB
+            if dt_wib and dt_wib >= kemarin_12malam:
                 is_match, matched_saham = is_target_saham(entry.title)
                 
                 if is_match:
                     source_name = entry.source.title if 'source' in entry else 'Google News'
                     pub_date_str = dt_wib.strftime("%d %b %Y, %H:%M WIB")
                     
-                    if send_telegram(entry.title, entry.link, source_name, pub_date_str, matched_saham):
-                        save_to_sheet(entry.link)
-                        sent_links.add(entry.link)
-                        time.sleep(1.5)
+                    collected_entries.append({
+                        'title': entry.title,
+                        'link': entry.link,
+                        'source': source_name,
+                        'pub_date_str': pub_date_str,
+                        'matched_saham': matched_saham,
+                        'dt_wib': dt_wib
+                    })
+
+    # STEP 2: Urutkan berita secara kronologis berdasarkan waktu (Terlama -> Terbaru)
+    collected_entries.sort(key=lambda x: x['dt_wib'])
+
+    # STEP 3: Kirim berita yang sudah diurutkan ke Telegram
+    for item in collected_entries:
+        if send_telegram(item['title'], item['link'], item['source'], item['pub_date_str'], item['matched_saham']):
+            save_to_sheet(item['link'])
+            sent_links.add(item['link'])
+            time.sleep(1.5)
 
 def main():
-    print("Bot sudah berjalan dan siap memantau berita!")
+    print("Bot berjalan memantau berita saham...")
     while True:
         try:
             check_and_send()
@@ -167,8 +216,7 @@ def main():
             print(f"Error loop utama: {e}")
         time.sleep(600)
 
-# --- 5. EKSEKUSI ---
+# --- 4. EKSEKUSI ---
 if __name__ == "__main__":
-    t = Thread(target=run)
-    t.start()
+    start_flask()
     main()
