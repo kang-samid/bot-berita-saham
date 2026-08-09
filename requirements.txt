@@ -1,6 +1,6 @@
 feedparser
 requests
 gspread
-oauth2client
-flask
+google-auth
 pytz
+flask
