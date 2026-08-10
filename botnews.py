@@ -46,11 +46,10 @@ def home():
     return "Bot News Saham Aktif di Render!"
 
 def run():
-    # Port diambil dari Environment variable Render atau default 8080
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- 3. SETUP GOOGLE SHEETS (MENGGUNAKAN GOOGLE-AUTH) ---
+# --- 3. SETUP GOOGLE SHEETS ---
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -86,6 +85,15 @@ def save_to_sheet(link):
         print(f"Error menyimpan ke sheet: {e}")
 
 # --- 4. FUNGSI LOGIKA BOT ---
+def clean_title(title):
+    """
+    Membersihkan judul agar berita dengan judul mirip/sama dianggap identik:
+    1. Membuang nama sumber berita di akhir judul (misal: '... - Detikcom' / '... | Antara')
+    2. Menghapus tanda baca & mengubah ke huruf kecil
+    """
+    title_main = re.split(r'[-|]', title)[0]  # Ambil bagian utama judul saja
+    return re.sub(r'[^a-zA-Z0-9]', '', title_main).lower()
+
 def generate_rss_urls(saham_list, chunk_size=20):
     urls = []
     for i in range(0, len(saham_list), chunk_size):
@@ -162,12 +170,18 @@ def check_and_send():
     
     sent_links = get_sent_links()
     collected_entries = []
+    seen_titles = set()  # Set untuk memfilter judul duplikat
 
     # 1. Kumpulkan Berita
     for url in rss_urls:
         feed = feedparser.parse(url)
         for entry in feed.entries:
             if entry.link in sent_links:
+                continue
+                
+            # Filter Judul Duplikat
+            cleaned_title = clean_title(entry.title)
+            if cleaned_title in seen_titles:
                 continue
                 
             raw_pub = entry.published if 'published' in entry else ''
@@ -180,6 +194,7 @@ def check_and_send():
                     source_name = entry.source.title if 'source' in entry else 'Google News'
                     pub_date_str = dt_wib.strftime("%d %b %Y, %H:%M WIB")
                     
+                    seen_titles.add(cleaned_title)  # Tandai judul sebagai sudah diproses
                     collected_entries.append({
                         'title': entry.title,
                         'link': entry.link,
