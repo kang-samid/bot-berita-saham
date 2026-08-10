@@ -38,7 +38,7 @@ KATA_RANGKUMAN = [
     "KOMPAK", "POTENSI REBOUND", "CEK SAHAM", "DAFTAR SAHAM", "LAJU IHSG", "CUPON"
 ]
 
-# --- 2. SETUP FLASK SERVER (RENDER KEEP-ALIVE) ---
+# --- 2. SETUP FLASK SERVER ---
 app = Flask('')
 
 @app.route('/')
@@ -67,39 +67,46 @@ def init_sheet():
 
 sheet = init_sheet()
 
-def get_sent_links():
+def get_sent_history():
+    """Mengambil link (Kolom A) dan judul bersih (Kolom B) dari Google Sheets"""
     if not sheet:
-        return set()
+        return set(), set()
     try:
-        return set(sheet.col_values(1))
+        all_rows = sheet.get_all_values()
+        sent_links = set()
+        sent_titles = set()
+        for row in all_rows:
+            if len(row) >= 1:
+                sent_links.add(row[0])
+            if len(row) >= 2:
+                sent_titles.add(row[1])
+        return sent_links, sent_titles
     except Exception as e:
         print(f"Error mengambil data sheet: {e}")
-        return set()
+        return set(), set()
 
-def save_to_sheet(link):
+def save_to_sheet(link, cleaned_title):
+    """Menyimpan link di Kolom A dan Cleaned Title di Kolom B"""
     if not sheet:
         return
     try:
-        sheet.append_row([link])
+        sheet.append_row([link, cleaned_title])
     except Exception as e:
         print(f"Error menyimpan ke sheet: {e}")
 
 # --- 4. FUNGSI LOGIKA BOT ---
 def clean_title(title):
-    """
-    Membersihkan judul agar berita dengan judul mirip/sama dianggap identik:
-    1. Membuang nama sumber berita di akhir judul (misal: '... - Detikcom' / '... | Antara')
-    2. Menghapus tanda baca & mengubah ke huruf kecil
-    """
-    title_main = re.split(r'[-|]', title)[0]  # Ambil bagian utama judul saja
+    """Normalisasi judul secara mendalam"""
+    title_main = re.split(r'[-|]', title)[0]  # Potong nama media
     return re.sub(r'[^a-zA-Z0-9]', '', title_main).lower()
 
-def generate_rss_urls(saham_list, chunk_size=20):
+def generate_rss_urls(saham_list, chunk_size=15):
+    """Membagi query menjadi grup berformat Google Search yang sah"""
     urls = []
     for i in range(0, len(saham_list), chunk_size):
         chunk = saham_list[i:i + chunk_size]
-        query_saham = "+OR+".join(chunk)
-        url = f'https://news.google.com/rss/search?q={query_saham}&hl=id&gl=ID&ceid=ID:id'
+        query_saham = "%20OR%20".join(chunk)
+        url = f'https://news.google.com/rss/search?q=({query_saham})&hl=id&gl=ID&ceid=ID:id'
         urls.append(url)
     return urls
 
@@ -114,11 +121,11 @@ def format_ke_wib(published_str):
 def is_target_saham(title):
     title_upper = title.upper()
 
-    # 1. Filter Kata Rangkuman / Multi-Emiten
+    # 1. Filter Kata Rangkuman
     if any(kata in title_upper for kata in KATA_RANGKUMAN):
         return False, None
 
-    # 2. Cek Emiten yang Cocok
+    # 2. Cek Emiten
     konteks_saham = ["SAHAM", "EMITEN", "TBK", "DIVIDEN", "IPO", "LAPORAN KEUANGAN"]
     ada_konteks = any(k in title_upper for k in konteks_saham)
     
@@ -131,7 +138,7 @@ def is_target_saham(title):
             else:
                 matched_list.append(saham)
 
-    # 3. Hanya ambil jika persis 1 emiten
+    # 3. Hanya Single Emiten
     if len(matched_list) == 1:
         return True, matched_list[0]
         
@@ -161,27 +168,28 @@ def send_telegram(title, link, source, pub_date_str, matched_saham):
         return False
 
 def check_and_send():
-    rss_urls = generate_rss_urls(TARGET_SAHAM, chunk_size=20)
+    rss_urls = generate_rss_urls(TARGET_SAHAM, chunk_size=15)
     wib_tz = pytz.timezone('Asia/Jakarta')
     now_wib = datetime.now(wib_tz)
     
-    # Memantau berita sejak kemarin jam 00:00 WIB
+    # Batas waktu: Sejak kemarin jam 00:00 WIB
     kemarin_12malam = (now_wib - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     
-    sent_links = get_sent_links()
+    # Ambil riwayat terkirim (Link & Judul) dari Google Sheets
+    sent_links, sent_titles = get_sent_history()
     collected_entries = []
-    seen_titles = set()  # Set untuk memfilter judul duplikat
 
-    # 1. Kumpulkan Berita
+    # 1. Kumpulkan seluruh berita baru dari SEMUA URL RSS
     for url in rss_urls:
         feed = feedparser.parse(url)
         for entry in feed.entries:
+            # Skip jika link sudah pernah dikirim
             if entry.link in sent_links:
                 continue
                 
-            # Filter Judul Duplikat
+            # Skip jika judul bersih sudah pernah dikirim
             cleaned_title = clean_title(entry.title)
-            if cleaned_title in seen_titles:
+            if cleaned_title in sent_titles:
                 continue
                 
             raw_pub = entry.published if 'published' in entry else ''
@@ -194,23 +202,26 @@ def check_and_send():
                     source_name = entry.source.title if 'source' in entry else 'Google News'
                     pub_date_str = dt_wib.strftime("%d %b %Y, %H:%M WIB")
                     
-                    seen_titles.add(cleaned_title)  # Tandai judul sebagai sudah diproses
+                    # Tambahkan sementara ke local set agar tidak ganda dalam 1 batch
+                    sent_titles.add(cleaned_title)
+                    
                     collected_entries.append({
                         'title': entry.title,
                         'link': entry.link,
                         'source': source_name,
                         'pub_date_str': pub_date_str,
                         'matched_saham': matched_saham,
-                        'dt_wib': dt_wib
+                        'dt_wib': dt_wib,
+                        'cleaned_title': cleaned_title
                     })
 
-    # 2. Urutkan Kronologis (Terlama -> Terbaru)
+    # 2. Urutkan secara presisi Kronologis (Paling Lampau -> Paling Baru)
     collected_entries.sort(key=lambda x: x['dt_wib'])
 
-    # 3. Kirim ke Telegram
+    # 3. Kirim ke Telegram satu per satu secara berurutan
     for item in collected_entries:
         if send_telegram(item['title'], item['link'], item['source'], item['pub_date_str'], item['matched_saham']):
-            save_to_sheet(item['link'])
+            save_to_sheet(item['link'], item['cleaned_title'])
             sent_links.add(item['link'])
             time.sleep(1.5)
 
