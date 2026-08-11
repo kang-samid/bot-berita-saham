@@ -20,7 +20,7 @@ CHAT_ID = '@Kang_Zeyen'
 TARGET_SAHAM = [
   "AADI", "ACES", "ADMR", "ADRO", "AKRA", "AMMN", "AMRT", "ANTM", "ARTO", "ASII",
   "BBCA", "BBNI", "BBRI", "BBTN", "BFIN", "BKSL", "BMRI", "BRMS", "BRPT", "BSDE",
-  "BUKA", "BUMI", "CBDK", "CMRY", "CPIN", "CTRA", "CUAN", "DEWA", "DSNG", "ELSA",
+  "BUMI", "CBDK", "CMRY", "CPIN", "CTRA", "CUAN", "DEWA", "DSNG", "ELSA",
   "EMTK", "ENRG", "ERAA", "ESSA", "EXCL", "GGRM", "GOTO", "HEAL", "HRTA", "HRUM",
   "ICBP", "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG", "JPFA", "JSMR", "KIJA",
   "KLBF", "KPIG", "LSIP", "MAPA", "MAPI", "MBMA", "MDKA", "MEDC", "MIKA", "MYOR",
@@ -38,7 +38,7 @@ KATA_RANGKUMAN = [
     "KOMPAK", "POTENSI REBOUND", "CEK SAHAM", "DAFTAR SAHAM", "LAJU IHSG", "CUPON"
 ]
 
-# --- 2. SETUP FLASK SERVER ---
+# --- 2. SETUP FLASK SERVER (RENDER KEEP-ALIVE) ---
 app = Flask('')
 
 @app.route('/')
@@ -96,12 +96,12 @@ def save_to_sheet(link, cleaned_title):
 
 # --- 4. FUNGSI LOGIKA BOT ---
 def clean_title(title):
-    """Normalisasi judul secara mendalam"""
-    title_main = re.split(r'[-|]', title)[0]  # Potong nama media
+    """Normalisasi judul secara mendalam (menghapus nama media & karakter khusus)"""
+    title_main = re.split(r'[-|]', title)[0]  # Potong nama media di akhir judul
     return re.sub(r'[^a-zA-Z0-9]', '', title_main).lower()
 
 def generate_rss_urls(saham_list, chunk_size=15):
-    """Membagi query menjadi grup berformat Google Search yang sah"""
+    """Membagi query menjadi grup berformat Google Search resmi"""
     urls = []
     for i in range(0, len(saham_list), chunk_size):
         chunk = saham_list[i:i + chunk_size]
@@ -121,11 +121,33 @@ def format_ke_wib(published_str):
 def is_target_saham(title):
     title_upper = title.upper()
 
-    # 1. Filter Kata Rangkuman
+    # 1. Filter Kata Rangkuman / Multi-Emiten Umum
     if any(kata in title_upper for kata in KATA_RANGKUMAN):
         return False, None
 
-    # 2. Cek Emiten
+    # -------------------------------------------------------------
+    # 💥 PENYARINGAN KHUSUS ANTM (Membedakan Saham vs Emas/Perak Fisik)
+    # -------------------------------------------------------------
+    KATA_LOGAM_ANTM = [
+        "HARGA EMAS", "LOGAM MULIA", "EMAS ANTAM", "HARGA JUAL EMAS",
+        "EMAS DUNIA", "XAUUSD", "HARGA BELI KEMBALI", "BUYBACK EMAS", 
+        "PERAK ANTAM", "HARGA PERAK", "PERAK HARI INI"
+    ]
+    KONTEKS_SAHAM_ANTM = [
+        "SAHAM", "EMITEN", "TBK", "KINERJA", "LABA", "DIVIDEN", 
+        "IPO", "LAPORAN KEUANGAN", "PROSPEK", "PENDAPATAN", "OPERASIONAL", "TAMBANG"
+    ]
+
+    # Jika judul memuat ANTM
+    if re.search(r'\bANTM\b', title_upper):
+        # Jika judul memuat kata-kata harga emas/perak/logam mulia fisik
+        if any(kata in title_upper for kata in KATA_LOGAM_ANTM):
+            # Hanya loloskan jika ada konteks saham yang SANGAT TEGAS
+            if not any(konteks in title_upper for konteks in KONTEKS_SAHAM_ANTM):
+                return False, None  # ABAIKAN berita harga emas/perak fisik!
+    # -------------------------------------------------------------
+
+    # 2. Cek Emiten yang Cocok
     konteks_saham = ["SAHAM", "EMITEN", "TBK", "DIVIDEN", "IPO", "LAPORAN KEUANGAN"]
     ada_konteks = any(k in title_upper for k in konteks_saham)
     
@@ -175,7 +197,7 @@ def check_and_send():
     # Batas waktu: Sejak kemarin jam 00:00 WIB
     kemarin_12malam = (now_wib - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Ambil riwayat terkirim (Link & Judul) dari Google Sheets
+    # Ambil riwayat terkirim (Link & Cleaned Title) dari Google Sheets
     sent_links, sent_titles = get_sent_history()
     collected_entries = []
 
