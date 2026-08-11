@@ -20,25 +20,42 @@ CHAT_ID = '@Kang_Zeyen'
 TARGET_SAHAM = [
   "AADI", "ACES", "ADMR", "ADRO", "AKRA", "AMMN", "AMRT", "ANTM", "ARTO", "ASII",
   "BBCA", "BBNI", "BBRI", "BBTN", "BFIN", "BKSL", "BMRI", "BRMS", "BRPT", "BSDE",
-  "BUMI", "CBDK", "CMRY", "CPIN", "CTRA", "CUAN", "DEWA", "DSNG", "ELSA",
-  "EMTK", "ENRG", "ERAA", "ESSA", "EXCL", "GGRM", "GOTO", "HEAL", "HRTA", "HRUM",
-  "ICBP", "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG", "JPFA", "JSMR", "KIJA",
-  "KLBF", "KPIG", "LSIP", "MAPA", "MAPI", "MBMA", "MDKA", "MEDC", "MIKA", "MYOR",
-  "NCKL", "PGAS", "PGEO", "PNLF", "PTBA", "PTRO", "PWON", "RAJA", "RATU", "SCMA",
-  "SMGR", "SMRA", "SSIA", "TAPG", "TLKM", "TOWR", "TPIA", "UNTR", "UNVR", "WIFI"
+  "BUMI", "CBDK", "CMRY", "CPIN", "CTRA", "CUAN", "DEWA", "DSNG", "ELSA", "EMTK", 
+  "ENRG", "ERAA", "ESSA", "EXCL", "GGRM", "GOTO", "HEAL", "HRTA", "HRUM", "ICBP", 
+  "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG", "JPFA", "JSMR", "KIJA", "KLBF", 
+  "KPIG", "LSIP", "MAPA", "MAPI", "MBMA", "MDKA", "MEDC", "MIKA", "MYOR", "NCKL", 
+  "PGAS", "PGEO", "PNLF", "PTBA", "PTRO", "PWON", "RAJA", "RATU", "SCMA", "SMGR", 
+  "SMRA", "SSIA", "TAPG", "TLKM", "TOWR", "TPIA", "UNTR", "UNVR", "WIFI"
 ]
 
-# Ticker berupa kata umum (butuh konteks saham)
 KATA_UMUM = {"RAJA", "RATU", "EMAS", "BUMI", "BUKA", "DEWA", "WIFI", "ELSA", "CUAN", "MIKA", "INDY"}
 
-# Kata kunci penyaring RANGKUMAN / MULTI-EMITEN
 KATA_RANGKUMAN = [
     "REKOMENDASI", "REKOMENDASIKAN", "IHSG", "TOP GAINERS", "TOP LOSERS", 
     "SOPING SAHAM", "KOLEKSI SAHAM", "PILAH-PILIH", "CERAH", "MERAH", 
     "KOMPAK", "POTENSI REBOUND", "CEK SAHAM", "DAFTAR SAHAM", "LAJU IHSG", "CUPON"
 ]
 
-# --- 2. SETUP FLASK SERVER (RENDER KEEP-ALIVE) ---
+# ---------------------------------------------------------------------
+# 🎯 ATURAN PENYARINGAN KHUSUS (Centralized Config)
+# Tinggal tambah emiten di sini jika ada kasus serupa tanpa ubah logika kode!
+# ---------------------------------------------------------------------
+SPECIAL_FILTERS = {
+    "ANTM": {
+        "forbidden": ["HARGA EMAS", "LOGAM MULIA", "EMAS ANTAM", "HARGA JUAL EMAS", "EMAS DUNIA", "XAUUSD", "BUYBACK EMAS", "PERAK ANTAM", "HARGA PERAK", "PERAK HARI INI"],
+        "required": ["SAHAM", "EMITEN", "TBK", "KINERJA", "LABA", "DIVIDEN", "IPO", "LAPORAN KEUANGAN", "PROSPEK", "PENDAPATAN", "OPERASIONAL", "TAMBANG"]
+    },
+    "RATU": {
+        "forbidden": ["RATU DRAKOR", "RATU ELIZABETH", "DRAKOR", "SINOPSIS", "FILM", "SERIAL", "ARTIS", "PEMAIN"],
+        "required": ["SAHAM", "EMITEN", "TBK", "RATU PRABU", "RED PLANET", "IHSG", "DIVIDEN", "BEI"]
+    },
+    "RAJA": {
+        "forbidden": ["RAJA JULI", "RAJA AMPAT", "RAJA ARAB", "RAJA SAUDI"],
+        "required": ["SAHAM", "EMITEN", "TBK", "RUKUN RAHARJA", "IHSG", "DIVIDEN", "BEI"]
+    }
+}
+
+# --- 2. SETUP FLASK SERVER ---
 app = Flask('')
 
 @app.route('/')
@@ -50,10 +67,7 @@ def run():
     app.run(host='0.0.0.0', port=port)
 
 # --- 3. SETUP GOOGLE SHEETS ---
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def init_sheet():
     try:
@@ -62,113 +76,81 @@ def init_sheet():
         client = gspread.authorize(creds)
         return client.open("DatabaseBot").sheet1
     except Exception as e:
-        print(f"Error Koneksi Google Sheets: {e}")
+        print(f"Error Google Sheets: {e}")
         return None
 
 sheet = init_sheet()
 
 def get_sent_history():
-    """Mengambil link (Kolom A) dan judul bersih (Kolom B) dari Google Sheets"""
-    if not sheet:
-        return set(), set()
+    if not sheet: return set(), set()
     try:
         all_rows = sheet.get_all_values()
-        sent_links = set()
-        sent_titles = set()
-        for row in all_rows:
-            if len(row) >= 1:
-                sent_links.add(row[0])
-            if len(row) >= 2:
-                sent_titles.add(row[1])
-        return sent_links, sent_titles
+        return set(row[0] for row in all_rows if len(row) >= 1), set(row[1] for row in all_rows if len(row) >= 2)
     except Exception as e:
-        print(f"Error mengambil data sheet: {e}")
+        print(f"Error get history: {e}")
         return set(), set()
 
 def save_to_sheet(link, cleaned_title):
-    """Menyimpan link di Kolom A dan Cleaned Title di Kolom B"""
-    if not sheet:
-        return
+    if not sheet: return
     try:
         sheet.append_row([link, cleaned_title])
     except Exception as e:
-        print(f"Error menyimpan ke sheet: {e}")
+        print(f"Error save sheet: {e}")
 
 # --- 4. FUNGSI LOGIKA BOT ---
 def clean_title(title):
-    """Normalisasi judul secara mendalam (menghapus nama media & karakter khusus)"""
-    title_main = re.split(r'[-|]', title)[0]  # Potong nama media di akhir judul
+    title_main = re.split(r'[-|]', title)[0]
     return re.sub(r'[^a-zA-Z0-9]', '', title_main).lower()
 
 def generate_rss_urls(saham_list, chunk_size=15):
-    """Membagi query menjadi grup berformat Google Search resmi"""
     urls = []
     for i in range(0, len(saham_list), chunk_size):
         chunk = saham_list[i:i + chunk_size]
         query_saham = "%20OR%20".join(chunk)
-        url = f'https://news.google.com/rss/search?q=({query_saham})&hl=id&gl=ID&ceid=ID:id'
-        urls.append(url)
+        urls.append(f'https://news.google.com/rss/search?q=({query_saham})&hl=id&gl=ID&ceid=ID:id')
     return urls
 
 def format_ke_wib(published_str):
     try:
         dt = parsedate_to_datetime(published_str)
-        wib_tz = pytz.timezone('Asia/Jakarta')
-        return dt.astimezone(wib_tz)
+        return dt.astimezone(pytz.timezone('Asia/Jakarta'))
     except Exception:
         return None
 
 def is_target_saham(title):
     title_upper = title.upper()
 
-    # 1. Filter Kata Rangkuman / Multi-Emiten Umum
+    # 1. Filter Rangkuman / Multi-emiten
     if any(kata in title_upper for kata in KATA_RANGKUMAN):
         return False, None
 
-    # -------------------------------------------------------------
-    # 💥 PENYARINGAN KHUSUS ANTM (Membedakan Saham vs Emas/Perak Fisik)
-    # -------------------------------------------------------------
-    KATA_LOGAM_ANTM = [
-        "HARGA EMAS", "LOGAM MULIA", "EMAS ANTAM", "HARGA JUAL EMAS",
-        "EMAS DUNIA", "XAUUSD", "HARGA BELI KEMBALI", "BUYBACK EMAS", 
-        "PERAK ANTAM", "HARGA PERAK", "PERAK HARI INI"
-    ]
-    KONTEKS_SAHAM_ANTM = [
-        "SAHAM", "EMITEN", "TBK", "KINERJA", "LABA", "DIVIDEN", 
-        "IPO", "LAPORAN KEUANGAN", "PROSPEK", "PENDAPATAN", "OPERASIONAL", "TAMBANG"
-    ]
-
-    # Jika judul memuat ANTM
-    if re.search(r'\bANTM\b', title_upper):
-        # Jika judul memuat kata-kata harga emas/perak/logam mulia fisik
-        if any(kata in title_upper for kata in KATA_LOGAM_ANTM):
-            # Hanya loloskan jika ada konteks saham yang SANGAT TEGAS
-            if not any(konteks in title_upper for konteks in KONTEKS_SAHAM_ANTM):
-                return False, None  # ABAIKAN berita harga emas/perak fisik!
-    # -------------------------------------------------------------
-
-    # 2. Cek Emiten yang Cocok
-    konteks_saham = ["SAHAM", "EMITEN", "TBK", "DIVIDEN", "IPO", "LAPORAN KEUANGAN"]
-    ada_konteks = any(k in title_upper for k in konteks_saham)
-    
     matched_list = []
+    konteks_generik = ["SAHAM", "EMITEN", "TBK", "DIVIDEN", "IPO", "LAPORAN KEUANGAN", "BURSA", "BEI", "IHSG"]
+
+    # 2. Iterasi Emiten dengan Logika Dinamis
     for saham in TARGET_SAHAM:
         if re.search(rf'\b{saham}\b', title_upper):
-            if saham in KATA_UMUM:
-                if ada_konteks:
-                    matched_list.append(saham)
-            else:
-                matched_list.append(saham)
+            
+            # Cek jika emiten punya aturan khusus di SPECIAL_FILTERS
+            if saham in SPECIAL_FILTERS:
+                rule = SPECIAL_FILTERS[saham]
+                if any(bad in title_upper for bad in rule["forbidden"]):
+                    # Jika ada kata terlarang, wajib ada salah satu kata positif/konteks
+                    if not any(good in title_upper for good in rule["required"]):
+                        continue  # Abaikan berita ini
+            
+            # Cek jika emiten masuk KATA_UMUM generik lainnya
+            elif saham in KATA_UMUM:
+                if not any(k in title_upper for k in konteks_generik):
+                    continue
 
-    # 3. Hanya Single Emiten
-    if len(matched_list) == 1:
-        return True, matched_list[0]
-        
-    return False, None
+            matched_list.append(saham)
+
+    # 3. Hanya loloskan jika persis 1 emiten
+    return (True, matched_list[0]) if len(matched_list) == 1 else (False, None)
 
 def send_telegram(title, link, source, pub_date_str, matched_saham):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    
     message_text = (
         f"📌 *[{matched_saham}]*\n"
         f"📢 *{title}*\n\n"
@@ -176,71 +158,49 @@ def send_telegram(title, link, source, pub_date_str, matched_saham):
         f"⏰ *Waktu:* {pub_date_str}\n\n"
         f"👉 [Baca Selengkapnya Di Sini]({link})"
     )
-    
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message_text,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": False
-    }
+    payload = {"chat_id": CHAT_ID, "text": message_text, "parse_mode": "Markdown", "disable_web_page_preview": False}
     try:
-        response = requests.post(url, data=payload)
-        return response.status_code == 200
+        return requests.post(url, data=payload).status_code == 200
     except Exception:
         return False
 
 def check_and_send():
     rss_urls = generate_rss_urls(TARGET_SAHAM, chunk_size=15)
-    wib_tz = pytz.timezone('Asia/Jakarta')
-    now_wib = datetime.now(wib_tz)
-    
-    # Batas waktu: Sejak kemarin jam 00:00 WIB
+    now_wib = datetime.now(pytz.timezone('Asia/Jakarta'))
     kemarin_12malam = (now_wib - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Ambil riwayat terkirim (Link & Cleaned Title) dari Google Sheets
     sent_links, sent_titles = get_sent_history()
     collected_entries = []
 
-    # 1. Kumpulkan seluruh berita baru dari SEMUA URL RSS
     for url in rss_urls:
         feed = feedparser.parse(url)
         for entry in feed.entries:
-            # Skip jika link sudah pernah dikirim
-            if entry.link in sent_links:
-                continue
+            if entry.link in sent_links: continue
                 
-            # Skip jika judul bersih sudah pernah dikirim
             cleaned_title = clean_title(entry.title)
-            if cleaned_title in sent_titles:
-                continue
+            if cleaned_title in sent_titles: continue
                 
-            raw_pub = entry.published if 'published' in entry else ''
-            dt_wib = format_ke_wib(raw_pub)
+            dt_wib = format_ke_wib(entry.get('published', ''))
             
             if dt_wib and dt_wib >= kemarin_12malam:
                 is_match, matched_saham = is_target_saham(entry.title)
-                
                 if is_match:
                     source_name = entry.source.title if 'source' in entry else 'Google News'
-                    pub_date_str = dt_wib.strftime("%d %b %Y, %H:%M WIB")
-                    
-                    # Tambahkan sementara ke local set agar tidak ganda dalam 1 batch
                     sent_titles.add(cleaned_title)
-                    
                     collected_entries.append({
                         'title': entry.title,
                         'link': entry.link,
                         'source': source_name,
-                        'pub_date_str': pub_date_str,
+                        'pub_date_str': dt_wib.strftime("%d %b %Y, %H:%M WIB"),
                         'matched_saham': matched_saham,
                         'dt_wib': dt_wib,
                         'cleaned_title': cleaned_title
                     })
 
-    # 2. Urutkan secara presisi Kronologis (Paling Lampau -> Paling Baru)
+    # Urutkan kronologis
     collected_entries.sort(key=lambda x: x['dt_wib'])
 
-    # 3. Kirim ke Telegram satu per satu secara berurutan
+    # Kirim
     for item in collected_entries:
         if send_telegram(item['title'], item['link'], item['source'], item['pub_date_str'], item['matched_saham']):
             save_to_sheet(item['link'], item['cleaned_title'])
@@ -256,7 +216,6 @@ def main():
             print(f"Error loop utama: {e}")
         time.sleep(600)
 
-# --- 5. EKSEKUSI ---
 if __name__ == "__main__":
     t = Thread(target=run)
     t.start()
